@@ -90,7 +90,7 @@ def create_toolbox():
         args={
             "section_id": {
                 "type": str,
-                "description": "Identifier for the story section to be modified (e.g., version:1.0/setting)"
+                "description": "Base name of the story section to be modified (e.g., 'setting') without version"
             },
             "new_content": {
                 "type": str,
@@ -98,7 +98,7 @@ def create_toolbox():
             }
         },
         description="Applies versioned updates to specific sections of the story. Use section_id with version."
-    )
+    ) 
     return toolbox
 
 WORLD_BUILDER = {
@@ -203,11 +203,14 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
     global current_story
 
     processing_steps = [
-        (WORLD_BUILDER, "setting"),
-        (STORY_CRAFTER, "progression"),
-        (TWIST_MASTER, "twist"),
-        (HUMOR_SPECIALIST, "characters"),
-        (CLARITY_EDITOR, "hook")
+        # Revised processing order - core narrative elements first, clarity checks more frequent
+        (STORY_CRAFTER, "structure"),  # Initial structural analysis
+        (WORLD_BUILDER, "setting"),    # Establish world fundamentals
+        (STORY_CRAFTER, "pacing"),     # Secondary pacing pass after world details
+        (CLARITY_EDITOR, "prose"),     # Initial clarity sweep
+        (TWIST_MASTER, "twist"),       # Plot enhancements
+        (CLARITY_EDITOR, "flow"),      # Final clarity check after twists
+        (HUMOR_SPECIALIST, "dialogue") # Humor as final layer
     ]
 
     current_story = story
