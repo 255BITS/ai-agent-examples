@@ -33,11 +33,18 @@ def create_toolbox():
 
     def apply_diff(section_id: str, new_content: str) -> str:
         global current_story
-        section_id = section_id.split("/")[-1] # Extract section_id without version
-        pattern = rf"({{{{version:((?:\d+\.)*\d+)/{re.escape(section_id)}}}}})(.*?)({{{{/version}}}})"
+        
+        # Split section_id into version and section name
+        version_part, section_name = section_id.split('/', 1)
+        
+        # Create exact match pattern for current version
+        pattern = rf"({{{{version:{re.escape(section_id)}}}}})(.*?)({{{{/version}}}})"
 
         match = re.search(pattern, current_story, re.DOTALL)
-
+        if not match:
+            print(f"Couldn't find section: {section_id}")
+            return current_story
+        
         if not match:
             print("Couldn't find section:", section_id)
             return current_story
@@ -45,17 +52,18 @@ def create_toolbox():
         # Handle versions with/without minor numbers
         version_str = match.group(2)
         version_parts = version_str.split('.')
-        major, minor = (int(version_parts[0]), int(version_parts[1])) if len(version_parts) > 1 else (int(version_str), 0)
+        major = int(version_parts[0])
+        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
 
         new_version = f"{major}.{minor + 1}"
-
-        updated_section = (
-            f"{{{{version:{new_version}/{section_id}}}}}\n"
+        new_section_id = f"{new_version}/{section_name}"
+        
+        updated_section = ( 
+            f"{{{{version:{new_section_id}}}}}\n"
             f"{new_content}\n"
-            f"{{{{/version}}}}"
-        )
-
-        result = re.sub(pattern, updated_section, current_story, 1, re.DOTALL)
+            f"{{{{/version}}}}")
+            
+        result = current_story.replace(full_opening_tag + content + "{{/version}}", updated_section)
 
         if result is None:
             print("Failed to apply")
