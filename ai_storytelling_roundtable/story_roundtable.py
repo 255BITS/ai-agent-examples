@@ -34,36 +34,49 @@ def create_toolbox():
     def apply_diff(section_id: str, new_content: str) -> str:
         global current_story
         
-        # Split section_id into version and section name
-        version_part, section_name = section_id.split('/', 1)
-        
-        # Create exact match pattern for current version
-        pattern = rf"({{{{version:{re.escape(section_id)}}}}})(.*?)({{{{/version}}}})"
+        # Extract pure section name without version
+        section_name = section_id.split('/')[-1]
 
-        match = re.search(pattern, current_story, re.DOTALL)
-        if not match:
-            print(f"Couldn't find section: {section_id}")
-            return current_story
+        # Find all existing versions of this section
+        version_pattern = rf"{{{{version:(\d+\.\d+)/{re.escape(section_name)}}}}}(.*?){{{{/version}}}}"
+        matches = list(re.finditer(version_pattern, current_story, re.DOTALL))
         
-        if not match:
-            print("Couldn't find section:", section_id)
+        if not matches:
+            print(f"Creating initial version for section: {section_name}")
+            new_section = f"{{{{version:1.0/{section_name}}}}}\n{new_content}\n{{{{/version}}}}"
+            current_story += f"\n\n{new_section}"
             return current_story
 
-        # Handle versions with/without minor numbers
-        version_str = match.group(2)
-        version_parts = version_str.split('.')
-        major = int(version_parts[0])
-        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+        # Find highest existing version
+        latest_version = (0, 0)
+        latest_match = None
+        for match in matches:
+            version_str = match.group(1)
+            major, minor = map(int, version_str.split('.'))
+            if (major, minor) > latest_version:
+                latest_version = (major, minor)
+                latest_match = match
 
-        new_version = f"{major}.{minor + 1}"
+        if not latest_match:
+            return current_story  # Should never happen due to previous check
+
+        # Increment version
+        new_major, new_minor = latest_version
+        new_minor += 1
+        new_version = f"{new_major}.{new_minor}"
         new_section_id = f"{new_version}/{section_name}"
-        
-        updated_section = ( 
-            f"{{{{version:{new_section_id}}}}}\n"
-            f"{new_content}\n"
-            f"{{{{/version}}}}")
-            
-        result = current_story.replace(full_opening_tag + content + "{{/version}}", updated_section)
+
+        # Build replacement text
+        updated_section = (
+            f"{{{{version:{new_section_id}}}}}\n{new_content}\n{{{{/version}}}}"
+        )
+
+        # Replace only the latest version's section
+        old_section = latest_match.group(0)
+        result = current_story.replace(
+            old_section,
+            updated_section
+        )
 
         if result is None:
             print("Failed to apply")
