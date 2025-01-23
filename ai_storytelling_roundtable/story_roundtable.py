@@ -118,7 +118,7 @@ def create_toolbox():
         for section in new_sections:
             current_story += f"{{{{version:{section['version'][0]}.{section['version'][1]}/{section['name']}}}}}\n"
             current_story += "\n".join(section['content']) + "\n"
-            current_story += "{{/version}}\n\n"
+            current_story += "{{/version}}\n"
         return current_story
 
     toolbox.add_tool(
