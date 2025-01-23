@@ -69,6 +69,10 @@ def create_toolbox():
 
 async def polish_story(notes: str, story: str, model_name: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
+    # Debug logging for input tracking
+    print(f"\n[DEBUG] Starting iteration {current_iteration+1}")
+    print(f"[DEBUG] Notes length: {len(notes)}, Story length: {len(story)}")
+    
     parser = XMLParser(tag="use_tool") 
     formatter = XMLPromptFormatter(tag="use_tool") 
     toolbox = create_toolbox() # Create toolbox for each iteration to reset notes
@@ -79,10 +83,9 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
     system_prompt = NARRATIVE_FINISHER["system"].replace("USER_INPUT", user_input)
 
     # Build iterative prompt
-    prompt = f"Write this as a short story draft. Don't copy sections, instead pull from the sections as needed to make it compelling yet accessible. Iteration (iteration {current_iteration+1}/{max_iterations}):\n\n"
+    prompt = f"REFINE CURRENT STORY DRAFT. Iteration ({current_iteration+1}/{max_iterations}):\n\n"
     prompt += f"Notes:\n{notes}"
-    if notes != story:
-        prompt += f"\nCurrent Story(modify this):\n{story}"
+    prompt += f"\n\nCurrent Story (MODIFY THIS VERSION):\n{story}"
 
     if previous_notes:
         notes_str = "\n".join([f"- Iteration {i+1}: {note}"
@@ -90,8 +93,8 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
         prompt += f"\n\nPrevious refinement notes:\n{notes_str}\n\nUse <use_tool> ONCE to provide a SINGLE ANALYSIS NOTE containing all refinement insights."
 
     print("SYSTEM", system_prompt)
-    print("PROMPT", prompt+"\n\n"+ tool_prompt)
-
+    print(f"[PROMPT STRUCTURE]\nInstruction: {user_input}\nChars: {len(prompt)}")
+    
     response = await llm_call(
         system=system_prompt,
         messages=[{
@@ -101,6 +104,7 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
         model_name=model_name
     )
 
+    print(f"[DEBUG] Response length: {len(response)}")
     print("RESPONSE", response)
 
     story_content = response.strip() # story is the full response now, tool call will be parsed out
@@ -109,6 +113,8 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
         if event.is_tool_call:
             notes_added.append(toolbox.use(event))  # Preserve complete notes as single entries
     iteration_notes = " ".join(notes_added) if notes_added else ""
+    
+    print(f"[DEBUG] Iteration complete. New story length: {len(story_content)}")
 
     return story_content, iteration_notes
 
@@ -118,6 +124,8 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
 
     change_log = []
     original_notes = story
+
+    print(f"\n[INITIAL INPUT] Story length: {len(story)} chars")
 
     for i in range(max_iterations):
         print(f"Refinement iteration {i+1}/{max_iterations}")
