@@ -171,12 +171,14 @@ class InferenceEngine:
                                 pass
 
 
-async def llm_call(system, messages):
+async def llm_call(system, messages, model_name=None):
     engine = InferenceEngine(
         provider="nanogpt",
-        model_name="deepseek-reasoner",
+        model_name=model_name or "deepseek-reasoner",
         max_tokens=4096,
     )
+    if model_name == "gemini-2.0-flash-thinking-exp-01-21":
+        messages[0]['content'] = system+"\n"+messages[0]["content"]
     response_text = ""
     async for event in engine.infer_stream(
         messages=messages,

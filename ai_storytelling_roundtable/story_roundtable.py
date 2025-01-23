@@ -14,7 +14,12 @@ from common.inference_engine import llm_call
 # Shared prompt components
 BASE_EXPECTATIONS = """
 Review the story and suggest improvements within your specialty area to enhance its quality and impact.
-Use the apply_diff tool to modify specific sections by providing revised content.
+Use the replace_section tool to modify specific sections by providing revised content.
+<use_tool>
+  <name>replace_section</name>
+  <section_id>somesection</section_id>
+  <new_content>newcontent</new_content>
+</use_tool>
 
 Always ensure your changes maintain:
 - Consistency with established story elements
@@ -61,57 +66,59 @@ def parse_sections(content: str) -> list:
                 state = "outside"
             else:
                 current_section['content'].append(line)
-    
+
     return sections
 
 def create_toolbox():
-    toolbox = Toolbox()
+    toolbox = Toolbox() # Initialize toolbox here so current_story is accessible in tool function
     global current_story
 
-    def replace_section(section_id: str, new_content: str) -> str:
+    def replace_section(section_id: str, new_content: str):
         global current_story
         target_section = section_id.split('/')[-1]
         sections = parse_sections(current_story)
-        
-        # Find all versions of target section
+
+        # Find all versions of the target section
         target_versions = [s for s in sections if s['name'] == target_section]
-        
+
+        latest_version = (0, 0)  # Default if no section exists
+
         if not target_versions:
-            # Create new section if none exists
-            new_version = "1.0"
-            new_section = (
-                f"{{version:{new_version}/{target_section}}}\n"
-                f"{new_content}\n"
-                "{{/version}}"
-            )
-            current_story += f"\n\n{new_section}"
-            return current_story
+            new_major, new_minor = 1, 0 # Start at 1.0 if no section exists
+        else:
+            latest_version = max(target_versions, key=lambda x: x['version'])['version']
+            new_major, new_minor = latest_version
+            new_minor += 1
+        new_version_str = f"{new_major}.{new_minor}"
 
-        # Find latest version
-        latest = max(target_versions, key=lambda x: x['version'])
-        new_major, new_minor = latest['version']
-        new_minor += 1
-        new_version = f"{new_major}.{new_minor}"
-
-        # Rebuild content with updated section
-        output = []
-        in_replacement = False
+        new_sections = []
         for section in sections:
             if section['name'] == target_section:
-                if section['version'] != latest['version']:
-                    # Skip older versions of the same section
-                    continue
-                # Process the latest version by replacing it
-                output.append(f"{{version:{new_version}/{target_section}}}")
-                output.append(new_content.strip())  # Prevent empty line issues
-                output.append("{{/version}}")
-                in_replacement = True
+                if section['version'] == latest_version:
+                    # Replace the latest version
+                    new_sections.append({
+                        'name': target_section,
+                        'version': (new_major, new_minor),
+                        'content': new_content.strip().splitlines(),
+                    })
+                else:
+                    # Keep older versions as they are
+                    new_sections.append(section)
             else:
-                output.append(section['start_line'])
-                output.extend(section['content'])
-                output.append(section['end_line'])
+                new_sections.append(section)
 
-        current_story = '\n'.join(output)
+        if not target_versions: # if no sections were found, append a new one
+            new_sections.append({
+                        'name': target_section,
+                        'version': (new_major, new_minor),
+                        'content': new_content.strip().splitlines(),
+                    })
+
+        current_story = ""
+        for section in new_sections:
+            current_story += f"{{{{version:{section['version'][0]}.{section['version'][1]}/{section['name']}}}}}\n"
+            current_story += "\n".join(section['content']) + "\n"
+            current_story += "{{/version}}\n\n"
         return current_story
 
     toolbox.add_tool(
@@ -120,7 +127,7 @@ def create_toolbox():
         args={
             "section_id": {
                 "type": str,
-                "description": "Base name of the story section to be modified (e.g., 'setting') without version"
+                "description": "Base name of the story section to be modified (e.g., 'setting') without version. Must match the section identifier after 'version:' in the section tag."
             },
             "new_content": {
                 "type": str,
@@ -226,7 +233,7 @@ USER_INPUT
 """
 }
 
-async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5) -> str:
+async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5, model_name: str = 'gemini-2.0-flash-thinking-exp-01-21') -> str:
     parser = XMLParser(tag="use_tool")
     formatter = XMLPromptFormatter(tag="use_tool")
     toolbox = create_toolbox()
@@ -263,7 +270,8 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
             print("USER", messages[0]["content"])
             response = await llm_call(
                 system=system,
-                messages=messages
+                messages=messages,
+                model_name=model_name
             )
             print(f"Response from {persona['name']}:\n{response}")
 
@@ -290,6 +298,8 @@ if __name__ == "__main__":
                         help='Refinement instructions for the AI agents')
     parser.add_argument('-m', '--max_iterations', type=int, default=5,
                         help='Maximum number of refinement passes (default: 5)')
+    parser.add_argument('--model', type=str, default='gemini-2.0-flash-thinking-exp-01-21',
+                        help='LLM model to use for inference')
 
     args = parser.parse_args()
 
@@ -301,7 +311,7 @@ if __name__ == "__main__":
     with open(args.input) as f:
         story = f.read()
 
-    final_story = asyncio.run(process_story_with_agents(story, args.command, args.max_iterations))
+    final_story = asyncio.run(process_story_with_agents(story, args.command, args.max_iterations, args.model))
 
     with open(args.output, "w") as f:
         f.write(final_story)
