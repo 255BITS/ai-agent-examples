@@ -1,8 +1,11 @@
 import re
-from ai_agent_toolbox import Toolbox, XMLParser
+from ai_agent_toolbox import Toolbox, XMLParser, XMLPromptFormatter
 from pathlib import Path
 import sys
+import json
 import asyncio
+import argparse
+from datetime import datetime
 
 repo_root = Path(__file__).parent.parent
 sys.path.append(str(repo_root))
@@ -22,16 +25,6 @@ Always ensure your changes maintain:
 Identify the section you will focus on and explain your reasoning. Prioritize sections marked with TODO. If all TODOs are addressed, select the section that would benefit most from refinement in your area of expertise.
 """
 
-TOOL_USAGE_GUIDE = """
-To revise story sections, use the apply_diff tool with XML tags as follows:
-<use_tool>
-    <name>apply_diff</name>
-    <section_id>[version:X.Y/section_id]</section_id>
-    <new_content>[Your improved content for this section]</new_content>
-</use_tool>
-Focus your response on improving only one section at a time. Ensure the section_id accurately reflects the section you are modifying, including the current version.
-"""
-
 current_story = None
 
 def create_toolbox():
@@ -41,15 +34,19 @@ def create_toolbox():
     def apply_diff(section_id: str, new_content: str) -> str:
         global current_story
         section_id = section_id.split("/")[-1] # Extract section_id without version
-        pattern = rf"({{{{version:(\d+\.\d+)/{section_id}}}}})(.*?)({{{{/version}}}})"
+        pattern = rf"({{{{version:((?:\d+\.)*\d+)/{re.escape(section_id)}}}}})(.*?)({{{{/version}}}})"
+
         match = re.search(pattern, current_story, re.DOTALL)
 
         if not match:
             print("Couldn't find section:", section_id)
             return current_story
 
-        current_version = match.group(2)
-        major, minor = map(int, current_version.split('.'))
+        # Handle versions with/without minor numbers
+        version_str = match.group(2)
+        version_parts = version_str.split('.')
+        major, minor = (int(version_parts[0]), int(version_parts[1])) if len(version_parts) > 1 else (int(version_str), 0)
+
         new_version = f"{major}.{minor + 1}"
 
         updated_section = (
@@ -81,16 +78,13 @@ def create_toolbox():
         },
         description="Applies versioned updates to specific sections of the story. Use section_id with version."
     )
-
     return toolbox
-
 
 WORLD_BUILDER = {
     "name": "Aria Worldweaver",
     "role": "World Consistency Specialist",
     "system": f"""You are Aria Worldweaver, a master of crafting consistent and immersive story worlds. Your goal is to enrich the story's setting with vivid and believable details.
 {BASE_EXPECTATIONS}
-{TOOL_USAGE_GUIDE}
 
 Focus on these areas to improve the setting:
 - **Sensory Details:** Enhance descriptions to engage multiple senses (sight, sound, smell, touch, taste) making the environment more tangible and real for the reader.  Think about specific details that a reader could easily visualize and imagine experiencing.
@@ -110,7 +104,6 @@ TWIST_MASTER = {
     "role": "Plot Twist Architect",
     "system": f"""You are Nova Paradox, a master of crafting plot twists that are both surprising and deeply satisfying. Your aim is to create revelations that reframe the narrative in exciting ways.
 {BASE_EXPECTATIONS}
-{TOOL_USAGE_GUIDE}
 
 Focus on developing compelling plot twists by considering:
 - **Surprise and Inevitability:** Ensure twists are unexpected but feel logical in retrospect, based on clues subtly planted earlier.
@@ -130,7 +123,6 @@ STORY_CRAFTER = {
     "role": "Narrative Flow Specialist",
     "system": f"""You are Marcus Plotwright, a master of story structure and pacing. Your role is to ensure the story unfolds in a compelling and engaging manner, keeping the reader hooked from beginning to end.
 {BASE_EXPECTATIONS}
-{TOOL_USAGE_GUIDE}
 
 Focus on improving the story's narrative flow and structure by examining:
 - **Cause and Effect:** Ensure a clear and logical chain of cause and effect drives the plot forward. Identify any points where motivations or consequences are unclear and suggest improvements.
@@ -150,7 +142,6 @@ HUMOR_SPECIALIST = {
     "role": "Humor Integration Expert",
     "system": f"""You are Leo Quipster, an expert in organically weaving humor into narratives. Your objective is to enhance the story with humor that feels natural, character-driven, and appropriate to the overall tone.
 {BASE_EXPECTATIONS}
-{TOOL_USAGE_GUIDE}
 
 Focus on incorporating humor effectively by considering:
 - **Character-Driven Humor:**  Develop humorous situations and dialogue that arise naturally from character personalities and interactions. Think about how each character's quirks can be a source of comedy.
@@ -170,7 +161,6 @@ CLARITY_EDITOR = {
     "role": "Readability Enhancement Specialist",
     "system": f"""You are Clara Clearwater, a master of making prose clear, concise, and engaging. Your goal is to polish the story for maximum readability and impact.
 {BASE_EXPECTATIONS}
-{TOOL_USAGE_GUIDE}
 
 Focus on enhancing clarity and readability by improving:
 - **Clear Cause-Effect:** Ensure cause-and-effect relationships are explicitly stated and easy to follow.  Rephrase sentences to make connections more direct and obvious.
@@ -185,8 +175,9 @@ USER_INPUT
 """
 }
 
-async def process_story_with_agents(story: str, user_input: str) -> str:
+async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5) -> str:
     parser = XMLParser(tag="use_tool")
+    formatter = XMLPromptFormatter(tag="use_tool")
     toolbox = create_toolbox()
     global current_story
 
@@ -199,14 +190,15 @@ async def process_story_with_agents(story: str, user_input: str) -> str:
     ]
 
     current_story = story
-    for i in range(5):
+    for i in range(max_iterations):
         for persona, section in processing_steps:
             messages = [{
                 "role": "user",
                 "content": (
                     f"Review and improve this story section focusing on {section}, drawing upon your expertise as {persona['role']}. "
-                    f"Consider how to make the story more accessible and engaging for a reader new to this world, as per the user's request. "
-                    f"Current story state:\n\n{current_story}"
+                    f"Consider how to make the story more accessible and engaging for a reader new to this world. "
+                    f"Current story state:\n\n{current_story}\n" +
+                    formatter.usage_prompt(toolbox)
                 )
             }]
             print(f"Agent: {persona['name']}, Focusing on: {section}")
@@ -223,20 +215,38 @@ async def process_story_with_agents(story: str, user_input: str) -> str:
                     updated_story = toolbox.use(event)
                     current_story = updated_story
                     print(f"{persona['name']} modified {event.tool.args['section_id']}")
-            with open(f"story_intermediate_{section}_{i}.md", "w") as f:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            Path("working").mkdir(parents=True, exist_ok=True)
+            filename = f"working/{persona['name'].replace(' ', '_')}_iter{i}_{timestamp}.md"
+            with open(filename, "w") as f:
                 f.write(current_story)
 
     return current_story
 
 if __name__ == "__main__":
-    with open("story_flat.md") as f:
+    parser = argparse.ArgumentParser(description='AI-powered story refinement roundtable')
+    parser.add_argument('-i', '--input', type=Path, required=True,
+                        help='Input story file (MD format)')
+    parser.add_argument('-o', '--output', type=Path, default=Path('story_output.md'),
+                        help='Output file path')
+    parser.add_argument('-c', '--command', type=str, required=True,
+                        help='Refinement instructions for the AI agents')
+    parser.add_argument('-m', '--max_iterations', type=int, default=5,
+                        help='Maximum number of refinement passes (default: 5)')
+
+    args = parser.parse_args()
+
+    if not args.input.exists():
+        raise FileNotFoundError(f"Input file {args.input} not found")
+    if args.max_iterations < 1:
+        raise ValueError("Max iterations must be at least 1")
+
+    with open(args.input) as f:
         story = f.read()
-    user_input = "This story must be approachable for new people but be based in a unique land of magic. Please consider carefully how someone new to the world would read this and pay great mind to accessibility."
 
-    final_story = asyncio.run(process_story_with_agents(story, user_input))
+    final_story = asyncio.run(process_story_with_agents(story, args.command, args.max_iterations))
 
-    with open("story_output.md", "w") as f:
+    with open(args.output, "w") as f:
         f.write(final_story)
 
-    print("Story generation complete. Output saved to story_output.md")
-
+    print("Story generation complete. Output saved to "+args.output)

@@ -3,6 +3,7 @@ import sys
 import argparse
 import asyncio
 import re
+from datetime import datetime
 from pathlib import Path
 from ai_agent_toolbox import Toolbox, XMLParser
 repo_root = Path(__file__).parent.parent
@@ -86,7 +87,10 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
         change_log.append(note)
 
         # Save intermediate with notes
-        with open(f"refinement_iteration_{i+1}.md", "w") as f:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        Path("working").mkdir(parents=True, exist_ok=True)
+        intermediate_file = f"working/{output_path.stem}_iter{i+1}_{timestamp}.md"
+        with open(intermediate_file, "w") as f:
             f.write(f"<!-- ITERATION {i+1} NOTES:\n{note}\n-->\n\n{story}")
 
     with open(output_path, "w") as f:
