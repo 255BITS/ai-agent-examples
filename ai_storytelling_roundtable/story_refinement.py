@@ -65,7 +65,7 @@ def create_toolbox():
     return toolbox
 
 
-async def polish_story(story: str, model_name: str, user_input: str, current_iteration: int,
+async def polish_story(notes: str, story: str, model_name: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
     parser = XMLParser(tag="use_tool")
     formatter = XMLPromptFormatter(tag="use_tool")
@@ -78,7 +78,10 @@ async def polish_story(story: str, model_name: str, user_input: str, current_ite
     system_prompt = NARRATIVE_FINISHER["system"].replace("USER_INPUT", user_input)
 
     # Build iterative prompt
-    prompt = f"Write this as a short story draft (iteration {current_iteration+1}/{max_iterations}):\n\n{story}"
+    prompt = f"Write this as a short story draft. Don't copy sections, instead pull from the sections as needed to make it compelling yet accessible. Iteration (iteration {current_iteration+1}/{max_iterations}):\n\n"
+    prompt += f"Notes:\n{notes}"
+    if notes != story:
+        prompt += f"\nCurrent Story(modify this):\n{story}"
 
     if previous_notes:
         notes_str = "\n".join([f"- Iteration {i+1}: {note}"
@@ -98,11 +101,11 @@ async def polish_story(story: str, model_name: str, user_input: str, current_ite
     )
 
     story_content = response.strip() # story is the full response now, tool call will be parsed out
-    iteration_notes = ""
+    notes_added = []
     for event in parser.parse(response):
         if event.is_tool_call:
-            toolbox.use(event) # this will append to toolbox.refinement_notes
-            iteration_notes = toolbox.refinement_notes[-1] # get the last added note
+            notes_added = toolbox.use(event)  # Returns list of added notes
+    iteration_notes = notes_added[-1] if notes_added else ""
 
     return story_content, iteration_notes
 
@@ -111,11 +114,13 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
         story = f.read()
 
     change_log = []
+    original_notes = story
 
     for i in range(max_iterations):
         print(f"Refinement iteration {i+1}/{max_iterations}")
         refined_story, note = asyncio.run(
             polish_story(
+                original_notes,
                 story,
                 args.model, # Pass model here
                 instruction,
