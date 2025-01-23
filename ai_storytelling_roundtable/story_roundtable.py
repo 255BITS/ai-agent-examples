@@ -270,4 +270,4 @@ if __name__ == "__main__":
     with open(args.output, "w") as f:
         f.write(final_story)
 
-    print("Story generation complete. Output saved to "+args.output)
+    print(f"Story generation complete. Output saved to {args.output}")
