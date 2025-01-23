@@ -6,6 +6,7 @@ import json
 import asyncio
 import argparse
 from datetime import datetime
+import contextvars
 
 repo_root = Path(__file__).parent.parent
 sys.path.append(str(repo_root))
@@ -30,7 +31,7 @@ Always ensure your changes maintain:
 Identify the section you will focus on and explain your reasoning. Prioritize sections marked with TODO. If all TODOs are addressed, select the section that would benefit most from refinement in your area of expertise.
 """
 
-current_story = None
+current_story_context = contextvars.ContextVar('current_story', default='')
 
 def parse_sections(content: str) -> list:
     sections = []
@@ -71,10 +72,9 @@ def parse_sections(content: str) -> list:
 
 def create_toolbox():
     toolbox = Toolbox() # Initialize toolbox here so current_story is accessible in tool function
-    global current_story
 
-    def replace_section(section_id: str, new_content: str):
-        global current_story
+    def replace_section(section_id: str, new_content: str):        
+        current_story = current_story_context.get()
         target_section = section_id.split('/')[-1]
         sections = parse_sections(current_story)
 
@@ -114,11 +114,12 @@ def create_toolbox():
                         'content': new_content.strip().splitlines(),
                     })
 
-        current_story = ""
+        updated_story = ""
         for section in new_sections:
             current_story += f"{{{{version:{section['version'][0]}.{section['version'][1]}/{section['name']}}}}}\n"
             current_story += "\n".join(section['content']) + "\n"
             current_story += "{{/version}}\n"
+        current_story_context.set(updated_story)
         return current_story
 
     toolbox.add_tool(
@@ -250,7 +251,7 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
         (HUMOR_SPECIALIST, "dialogue") # Humor as final layer
     ]
 
-    current_story = story
+    current_story_context.set(story)
     for i in range(max_iterations):
         for persona, section in processing_steps:
             messages = [{
@@ -258,7 +259,7 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
                 "content": (
                     f"Review and improve this story section focusing on {section}, drawing upon your expertise as {persona['role']}. "
                     f"Consider how to make the story more accessible and engaging for a reader new to this world. "
-                    f"Current story state:\n\n{current_story}\n" +
+                    f"Current story state:\n\n{current_story_context.get()}\n" +
                     formatter.usage_prompt(toolbox)
                 )
             }]
@@ -278,15 +279,15 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
             for event in parser.parse(response):
                 if event.is_tool_call:
                     updated_story = toolbox.use(event)
-                    current_story = updated_story
+                    current_story_context.set(updated_story)
                     print(f"{persona['name']} modified event.tool.args['section_id']")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             Path("working").mkdir(parents=True, exist_ok=True)
             filename = f"working/{persona['name'].replace(' ', '_')}_iter{i}_{timestamp}.md"
             with open(filename, "w") as f:
-                f.write(current_story)
+                f.write(current_story_context.get())
 
-    return current_story
+    return current_story_context.get()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='AI-powered story refinement roundtable')
