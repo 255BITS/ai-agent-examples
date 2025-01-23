@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 import argparse
 import asyncio
+import contextvars
 import re
 from datetime import datetime
 from pathlib import Path
@@ -39,18 +40,18 @@ USER_INPUT
 """
 }
 
-current_story = None
-refinement_notes = []  # Global list to persist notes across iterations
-
+# Context-based state management
+current_story_context = contextvars.ContextVar('current_story', default='')
+refinement_notes_context = contextvars.ContextVar('refinement_notes', default=[])
 
 def create_toolbox():
     toolbox = Toolbox()
-    global refinement_notes
-
+    
     def add_notes(note: str):
-        global refinement_notes
+        notes = refinement_notes_context.get().copy()
+        notes.append(note)
+        refinement_notes_context.set(notes)
         print("NOTE", note)
-        refinement_notes.append(note)
         return note  # Return actual note content instead of confirmation
 
     toolbox.add_tool(
@@ -64,18 +65,15 @@ def create_toolbox():
         },
         description="Adds notes to the refinement log. Use this to provide analysis of changes and suggest further improvements in each iteration."
     )
-    toolbox.refinement_notes = refinement_notes # Attach notes list to toolbox for access later
     return toolbox
-
 
 async def polish_story(notes: str, story: str, model_name: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
     parser = XMLParser(tag="use_tool") 
     formatter = XMLPromptFormatter(tag="use_tool") 
     toolbox = create_toolbox() # Create toolbox for each iteration to reset notes
-    global current_story
-    current_story = story # make story accessible to tools if needed, though add_notes doesnt use it.
-
+    current_story_context.set(story)  # Set story in context
+    
     tool_prompt = formatter.usage_prompt(toolbox)
 
     system_prompt = NARRATIVE_FINISHER["system"].replace("USER_INPUT", user_input)
