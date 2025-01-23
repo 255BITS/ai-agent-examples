@@ -27,66 +27,91 @@ Identify the section you will focus on and explain your reasoning. Prioritize se
 
 current_story = None
 
+def parse_sections(content: str) -> list:
+    sections = []
+    current_section = None
+    state = "outside"
+    
+    for line in content.split('\n'):
+        if state == "outside":
+            if line.startswith("{{version:") and line.endswith("}}"):
+                version_part = line[10:-2].strip()
+                parts = version_part.split('/')
+                if len(parts) != 2:
+                    continue  # Invalid format
+                version, section_name = parts
+                try:
+                    major, minor = map(int, version.split('.'))
+                except ValueError:
+                    continue  # Invalid version format
+                current_section = {
+                    'name': section_name,
+                    'version': (major, minor),
+                    'start_line': line,
+                    'content': [],
+                    'end_line': None
+                }
+                state = "inside"
+        elif state == "inside":
+            if line.startswith("{{/version}}"):
+                current_section['end_line'] = line
+                sections.append(current_section)
+                current_section = None
+                state = "outside"
+            else:
+                current_section['content'].append(line)
+    
+    return sections
+
 def create_toolbox():
     toolbox = Toolbox()
     global current_story
 
-    def apply_diff(section_id: str, new_content: str) -> str:
+    def replace_section(section_id: str, new_content: str) -> str:
         global current_story
+        target_section = section_id.split('/')[-1]
+        sections = parse_sections(current_story)
         
-        # Extract pure section name without version
-        section_name = section_id.split('/')[-1]
-
-        # Find all existing versions of this section
-        version_pattern = rf"{{{{version:(\d+\.\d+)/{re.escape(section_name)}}}}}(.*?){{{{/version}}}}"
-        matches = list(re.finditer(version_pattern, current_story, re.DOTALL))
+        # Find all versions of target section
+        target_versions = [s for s in sections if s['name'] == target_section]
         
-        if not matches:
-            print(f"Creating initial version for section: {section_name}")
-            new_section = f"{{{{version:1.0/{section_name}}}}}\n{new_content}\n{{{{/version}}}}"
+        if not target_versions:
+            # Create new section if none exists
+            new_version = "1.0"
+            new_section = (
+                f"{{{{version:{new_version}/{target_section}}}}}\n"
+                f"{new_content}\n"
+                "{{{{/version}}}}"
+            )
             current_story += f"\n\n{new_section}"
             return current_story
 
-        # Find highest existing version
-        latest_version = (0, 0)
-        latest_match = None
-        for match in matches:
-            version_str = match.group(1)
-            major, minor = map(int, version_str.split('.'))
-            if (major, minor) > latest_version:
-                latest_version = (major, minor)
-                latest_match = match
-
-        if not latest_match:
-            return current_story  # Should never happen due to previous check
-
-        # Increment version
-        new_major, new_minor = latest_version
+        # Find latest version
+        latest = max(target_versions, key=lambda x: x['version'])
+        new_major, new_minor = latest['version']
         new_minor += 1
         new_version = f"{new_major}.{new_minor}"
-        new_section_id = f"{new_version}/{section_name}"
 
-        # Build replacement text
-        updated_section = (
-            f"{{{{version:{new_section_id}}}}}\n{new_content}\n{{{{/version}}}}"
-        )
+        # Rebuild content with updated section
+        output = []
+        in_replacement = False
+        for section in sections:
+            if section['name'] == target_section and section['version'] == latest['version']:
+                output.append(f"{{{{version:{new_version}/{target_section}}}}}")
+                output.extend(new_content.split('\n'))
+                output.append("{{{{/version}}}}")
+                in_replacement = True
+            else:
+                output.append(section['start_line'])
+                output.extend(section['content'])
+                output.append(section['end_line'])
 
-        # Replace only the latest version's section
-        old_section = latest_match.group(0)
-        result = current_story.replace(
-            old_section,
-            updated_section
-        )
-
-        if result is None:
-            print("Failed to apply")
-
-        current_story = result
+        current_story = '\n'.join(output)
         return current_story
 
     toolbox.add_tool(
-        name="apply_diff",
-        fn=apply_diff,
+        name="replace_section",
+        fn=replace_section,
         args={
             "section_id": {
                 "type": str,
@@ -97,7 +122,7 @@ def create_toolbox():
                 "description": "The complete new content to replace the specified story section"
             }
         },
-        description="Applies versioned updates to specific sections of the story. Use section_id with version."
+        description="Robust section replacement using finite state machine parsing. Automatically versions updates."
     ) 
     return toolbox
 
