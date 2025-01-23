@@ -31,17 +31,17 @@ def parse_sections(content: str) -> list:
     sections = []
     current_section = None
     state = "outside"
+    version_pattern = re.compile(r'^\{\{+version:([0-9]+\.[0-9]+)/([\w/]+)\}\}+$')
+    closing_pattern = re.compile(r'^\{\{+/version\}\}+$')
     
     for line in content.split('\n'):
         if state == "outside":
-            if line.startswith("{{version:") and line.endswith("}}"):
-                version_part = line[10:-2].strip()
-                parts = version_part.split('/')
-                if len(parts) != 2:
-                    continue  # Invalid format
-                version, section_name = parts
+            version_match = version_pattern.match(line)
+            if version_match:
+                version_str = version_match.group(1)
+                section_name = version_match.group(2)
                 try:
-                    major, minor = map(int, version.split('.'))
+                    major, minor = map(int, version_str.split('.'))
                 except ValueError:
                     continue  # Invalid version format
                 current_section = {
@@ -53,7 +53,8 @@ def parse_sections(content: str) -> list:
                 }
                 state = "inside"
         elif state == "inside":
-            if line.startswith("{{/version}}"):
+            closing_match = closing_pattern.match(line)
+            if closing_match:
                 current_section['end_line'] = line
                 sections.append(current_section)
                 current_section = None
@@ -79,9 +80,9 @@ def create_toolbox():
             # Create new section if none exists
             new_version = "1.0"
             new_section = (
-                f"{{{{version:{new_version}/{target_section}}}}}\n"
+                f"{{version:{new_version}/{target_section}}}\n"
                 f"{new_content}\n"
-                "{{{{/version}}}}"
+                "{{/version}}"
             )
             current_story += f"\n\n{new_section}"
             return current_story
@@ -96,10 +97,14 @@ def create_toolbox():
         output = []
         in_replacement = False
         for section in sections:
-            if section['name'] == target_section and section['version'] == latest['version']:
-                output.append(f"{{{{version:{new_version}/{target_section}}}}}")
-                output.extend(new_content.split('\n'))
-                output.append("{{{{/version}}}}")
+            if section['name'] == target_section:
+                if section['version'] != latest['version']:
+                    # Skip older versions of the same section
+                    continue
+                # Process the latest version by replacing it
+                output.append(f"{{version:{new_version}/{target_section}}}")
+                output.append(new_content.strip())  # Prevent empty line issues
+                output.append("{{/version}}")
                 in_replacement = True
             else:
                 output.append(section['start_line'])
@@ -253,6 +258,9 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
             print(f"Agent: {persona['name']}, Focusing on: {section}")
             system = persona["system"].replace("USER_INPUT", user_input)
 
+            print("SYSTEM", system)
+            print("____")
+            print("USER", messages[0]["content"])
             response = await llm_call(
                 system=system,
                 messages=messages
@@ -263,7 +271,7 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
                 if event.is_tool_call:
                     updated_story = toolbox.use(event)
                     current_story = updated_story
-                    print(f"{persona['name']} modified {event.tool.args['section_id']}")
+                    print(f"{persona['name']} modified event.tool.args['section_id']")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             Path("working").mkdir(parents=True, exist_ok=True)
             filename = f"working/{persona['name'].replace(' ', '_')}_iter{i}_{timestamp}.md"
