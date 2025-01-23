@@ -65,7 +65,7 @@ def create_toolbox():
     return toolbox
 
 
-async def polish_story(story: str, user_input: str, current_iteration: int,
+async def polish_story(story: str, model_name: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
     parser = XMLParser(tag="use_tool")
     formatter = XMLPromptFormatter(tag="use_tool")
@@ -93,8 +93,8 @@ async def polish_story(story: str, user_input: str, current_iteration: int,
         messages=[{
             "role": "user",
             "content": prompt + "\n\n" + tool_prompt
-        }]
-
+        }],
+        model_name=model_name
     )
 
     story_content = response.strip() # story is the full response now, tool call will be parsed out
@@ -107,7 +107,7 @@ async def polish_story(story: str, user_input: str, current_iteration: int,
     return story_content, iteration_notes
 
 def refine_story(input_path: Path, output_path: Path, instruction: str, max_iterations: int = 3):
-    with open(input_path) as f:
+    with open(input_path, encoding='utf-8') as f:
         story = f.read()
 
     change_log = []
@@ -117,6 +117,7 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
         refined_story, note = asyncio.run(
             polish_story(
                 story,
+                args.model, # Pass model here
                 instruction,
                 i,
                 max_iterations,
@@ -150,6 +151,8 @@ if __name__ == "__main__":
                         help='Refinement instructions for the AI')
     parser.add_argument('-m', '--max_iterations', type=int, default=3,
                         help='Number of refinement passes (default: 3)')
+    parser.add_argument('--model', type=str, default='gemini-2.0-flash-thinking-exp-01-21',
+                        help='LLM model to use for inference')
 
     args = parser.parse_args()
 
