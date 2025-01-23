@@ -36,8 +36,8 @@ def parse_sections(content: str) -> list:
     sections = []
     current_section = None
     state = "outside"
-    version_pattern = re.compile(r'^\{\{+version:([0-9]+\.[0-9]+)/([\w/]+)\}\}+$')
-    closing_pattern = re.compile(r'^\{\{+/version\}\}+$')
+    version_pattern = re.compile(r'^\{\{version:([0-9]+\.[0-9]+)/([\w/]+)\}\}$')
+    closing_pattern = re.compile(r'^\{\{/version\}\}$')
     
     for line in content.split('\n'):
         if state == "outside":
