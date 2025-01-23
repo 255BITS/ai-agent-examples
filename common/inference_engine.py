@@ -42,8 +42,7 @@ class InferenceEngine:
     async def infer_stream(
         self,
         messages: List[Dict[str, Any]],
-        system: Optional[str] = None,
-        toolbox=None,
+        system: Optional[str] = None
     ) -> AsyncGenerator[InferenceEvent, None]:
         """
         Async generator that yields InferenceEvent objects in real time.
@@ -172,7 +171,7 @@ class InferenceEngine:
                                 pass
 
 
-async def llm_call(system, messages, toolbox):
+async def llm_call(system, messages):
     engine = InferenceEngine(
         provider="nanogpt",
         model_name="deepseek-reasoner",
@@ -181,7 +180,6 @@ async def llm_call(system, messages, toolbox):
     response_text = ""
     async for event in engine.infer_stream(
         messages=messages,
-        toolbox=toolbox,
         system=system
     ):
         if event.type == "aiCompletion":
