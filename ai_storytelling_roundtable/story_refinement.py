@@ -40,15 +40,18 @@ USER_INPUT
 }
 
 current_story = None
+refinement_notes = []  # Global list to persist notes across iterations
+
 
 def create_toolbox():
     toolbox = Toolbox()
-    refinement_notes = []
+    global refinement_notes
 
     def add_notes(note: str):
-        nonlocal refinement_notes
+        global refinement_notes
+        print("NOTE", note)
         refinement_notes.append(note)
-        return "Notes added."
+        return note  # Return actual note content instead of confirmation
 
     toolbox.add_tool(
         name="add_notes",
@@ -56,7 +59,7 @@ def create_toolbox():
         args={
             "note": {
                 "type": str,
-                "description": "Notes from the refinement process. This should contain analysis of changes made and suggestions for further improvements."
+                "description": "Complete analysis of changes and suggestions as a single coherent note."
             }
         },
         description="Adds notes to the refinement log. Use this to provide analysis of changes and suggest further improvements in each iteration."
@@ -67,8 +70,8 @@ def create_toolbox():
 
 async def polish_story(notes: str, story: str, model_name: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
-    parser = XMLParser(tag="use_tool")
-    formatter = XMLPromptFormatter(tag="use_tool")
+    parser = XMLParser(tag="use_tool") 
+    formatter = XMLPromptFormatter(tag="use_tool") 
     toolbox = create_toolbox() # Create toolbox for each iteration to reset notes
     global current_story
     current_story = story # make story accessible to tools if needed, though add_notes doesnt use it.
@@ -86,7 +89,7 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
     if previous_notes:
         notes_str = "\n".join([f"- Iteration {i+1}: {note}"
                              for i, note in enumerate(previous_notes)])
-        prompt += f"\n\nPrevious refinement notes:\n{notes_str}\n\n Please use the <use_tool><name>add_notes</name>...</use_tool> tag to provide analysis notes."
+        prompt += f"\n\nPrevious refinement notes:\n{notes_str}\n\nUse <use_tool> ONCE to provide a SINGLE ANALYSIS NOTE containing all refinement insights."
 
     print("SYSTEM", system_prompt)
     print("PROMPT", prompt+"\n\n"+ tool_prompt)
@@ -100,12 +103,14 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
         model_name=model_name
     )
 
+    print("RESPONSE", response)
+
     story_content = response.strip() # story is the full response now, tool call will be parsed out
     notes_added = []
     for event in parser.parse(response):
         if event.is_tool_call:
-            notes_added = toolbox.use(event)  # Returns list of added notes
-    iteration_notes = notes_added[-1] if notes_added else ""
+            notes_added.append(toolbox.use(event))  # Preserve complete notes as single entries
+    iteration_notes = " ".join(notes_added) if notes_added else ""
 
     return story_content, iteration_notes
 
@@ -119,7 +124,7 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
     for i in range(max_iterations):
         print(f"Refinement iteration {i+1}/{max_iterations}")
         refined_story, note = asyncio.run(
-            polish_story(
+            polish_story(  # Toolbox now properly captures full notes
                 original_notes,
                 story,
                 args.model, # Pass model here
@@ -135,7 +140,7 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
         # Save intermediate with notes
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         Path("working").mkdir(parents=True, exist_ok=True)
-        intermediate_file = f"working/{output_path.stem}_iter{i+1}_{timestamp}.md"
+        intermediate_file = f"working/{output_path.stem}_iter{i+1}_{timestamp}.md"  # Unified note format
         with open(intermediate_file, "w") as f:
             f.write(f"<!-- ITERATION {i+1} NOTES:\n{note}\n-->\n\n{story}")
 
