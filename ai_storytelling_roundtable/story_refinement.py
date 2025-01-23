@@ -1,11 +1,14 @@
 # story_refinement.py
 import sys
+from pathlib import Path
 import argparse
 import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
 from ai_agent_toolbox import Toolbox, XMLParser
+from ai_agent_toolbox import XMLPromptFormatter
+
 repo_root = Path(__file__).parent.parent
 sys.path.append(str(repo_root))
 from common.inference_engine import llm_call
@@ -38,52 +41,89 @@ USER_INPUT
 
 current_story = None
 
+def create_toolbox():
+    toolbox = Toolbox()
+    refinement_notes = []
+
+    def add_notes(note: str):
+        nonlocal refinement_notes
+        refinement_notes.append(note)
+        return "Notes added."
+
+    toolbox.add_tool(
+        name="add_notes",
+        fn=add_notes,
+        args={
+            "note": {
+                "type": str,
+                "description": "Notes from the refinement process. This should contain analysis of changes made and suggestions for further improvements."
+            }
+        },
+        description="Adds notes to the refinement log. Use this to provide analysis of changes and suggest further improvements in each iteration."
+    )
+    toolbox.refinement_notes = refinement_notes # Attach notes list to toolbox for access later
+    return toolbox
 
 
 async def polish_story(story: str, user_input: str, current_iteration: int,
                       max_iterations: int, previous_notes: list = None) -> tuple:
     parser = XMLParser(tag="use_tool")
+    formatter = XMLPromptFormatter(tag="use_tool")
+    toolbox = create_toolbox() # Create toolbox for each iteration to reset notes
+    global current_story
+    current_story = story # make story accessible to tools if needed, though add_notes doesnt use it.
+
+    tool_prompt = formatter.usage_prompt(toolbox)
+
     system_prompt = NARRATIVE_FINISHER["system"].replace("USER_INPUT", user_input)
 
     # Build iterative prompt
-    prompt = f"Improve this story draft (iteration {current_iteration+1}/{max_iterations}):\n\n{story}"
+    prompt = f"Write this as a short story draft (iteration {current_iteration+1}/{max_iterations}):\n\n{story}"
 
     if previous_notes:
         notes_str = "\n".join([f"- Iteration {i+1}: {note}"
                              for i, note in enumerate(previous_notes)])
-        prompt += f"\n\nPrevious refinement notes:\n{notes_str}"
+        prompt += f"\n\nPrevious refinement notes:\n{notes_str}\n\n Please use the <use_tool><name>add_notes</name>...</use_tool> tag to provide analysis notes."
+
+    print("SYSTEM", system_prompt)
+    print("PROMPT", prompt+"\n\n"+ tool_prompt)
 
     response = await llm_call(
         system=system_prompt,
         messages=[{
             "role": "user",
-            "content": prompt
+            "content": prompt + "\n\n" + tool_prompt
         }]
+
     )
 
-    # Extract any analysis notes from the response
-    note_match = re.search(r"ANALYSIS NOTES:\n(.*?)\nSTORY:", response, re.DOTALL)
-    story_content = re.sub(r"ANALYSIS NOTES:.*?STORY:", "", response, flags=re.DOTALL).strip()
-    note = note_match.group(1).strip() if note_match else "No specific notes provided"
+    story_content = response.strip() # story is the full response now, tool call will be parsed out
+    iteration_notes = ""
+    for event in parser.parse(response):
+        if event.is_tool_call:
+            toolbox.use(event) # this will append to toolbox.refinement_notes
+            iteration_notes = toolbox.refinement_notes[-1] # get the last added note
 
-    return story_content, note
+    return story_content, iteration_notes
 
 def refine_story(input_path: Path, output_path: Path, instruction: str, max_iterations: int = 3):
     with open(input_path) as f:
         story = f.read()
 
     change_log = []
+
     for i in range(max_iterations):
         print(f"Refinement iteration {i+1}/{max_iterations}")
-        story, note = asyncio.run(
+        refined_story, note = asyncio.run(
             polish_story(
                 story,
                 instruction,
                 i,
                 max_iterations,
-                previous_notes=change_log if i > 0 else None
+                previous_notes=change_log if i > 0 else None,
             )
         )
+        story = refined_story # update story for next iteration
         change_log.append(note)
 
         # Save intermediate with notes
@@ -105,17 +145,17 @@ if __name__ == "__main__":
                         help='Input story file (MD format)')
     parser.add_argument('-o', '--output', type=Path, default=Path('story_final.md'),
                         help='Output file path')
-    parser.add_argument('-c', '--command', type=str, 
+    parser.add_argument('-c', '--command', type=str,
                         default="Apply professional editing polish while preserving story",
                         help='Refinement instructions for the AI')
     parser.add_argument('-m', '--max_iterations', type=int, default=3,
                         help='Number of refinement passes (default: 3)')
-    
+
     args = parser.parse_args()
-    
+
     if not args.input.exists():
         raise FileNotFoundError(f"Input file {args.input} not found")
     if args.max_iterations < 1:
         raise ValueError("Max iterations must be at least 1")
-    
+
     refine_story(args.input, args.output, args.command, args.max_iterations)
