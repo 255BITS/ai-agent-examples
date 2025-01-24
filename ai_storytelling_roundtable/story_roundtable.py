@@ -61,8 +61,8 @@ def create_toolbox():
         for name, content in sections.items():
             updated_story += f"<story>\n"
             updated_story += f"<name>{name}</name>\n"
-            updated_story += f"<content>\n"
-            updated_story += content+"\n"
+            updated_story += f"<content>"
+            updated_story += content
             updated_story += f"</content>\n</story>\n"
 
         return updated_story
