@@ -59,7 +59,7 @@ def create_toolbox():
         fn=add_notes,
         args={
             "note": {
-                "type": str,
+                "type": "string",
                 "description": "Complete analysis of changes and suggestions as a single coherent note."
             }
         },
@@ -68,7 +68,7 @@ def create_toolbox():
     return toolbox
 
 async def polish_story(notes: str, story: str, model_name: str, user_input: str, current_iteration: int,
-                      max_iterations: int, previous_notes: list = None) -> tuple:
+                      max_iterations: int, previous_notes: list = None) -> tuple[str, str]:
     # Debug logging for input tracking
     print(f"\n[DEBUG] Starting iteration {current_iteration+1}")
     print(f"[DEBUG] Notes length: {len(notes)}, Story length: {len(story)}")
@@ -76,6 +76,7 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
     parser = XMLParser(tag="use_tool") 
     formatter = XMLPromptFormatter(tag="use_tool") 
     toolbox = create_toolbox() # Create toolbox for each iteration to reset notes
+    refinement_notes_context.set([])  # Reset notes for this iteration
     current_story_context.set(story)  # Set story in context
     
     tool_prompt = formatter.usage_prompt(toolbox)
@@ -83,28 +84,31 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
     system_prompt = NARRATIVE_FINISHER["system"].replace("USER_INPUT", user_input)
 
     # Build iterative prompt
-    prompt = f"REFINE CURRENT STORY DRAFT. Iteration ({current_iteration+1}/{max_iterations}):\n\n"
-    prompt += f"Notes:\n{notes}"
-    prompt += f"\n\nCurrent Story (MODIFY THIS VERSION):\n{story}"
+    prompt = [
+        f"REFINE CURRENT STORY DRAFT. Iteration ({current_iteration+1}/{max_iterations}):",
+        "\n[INSTRUCTIONS] Apply these notes to improve the story:",
+        notes if notes else "No previous notes",
+        "\n\n[WORKING DRAFT] Modify THIS story version:",
+        f"{story}"
+    ]
 
     if previous_notes:
-        notes_str = "\n".join([f"- Iteration {i+1}: {note}"
-                             for i, note in enumerate(previous_notes)])
-        prompt += f"\n\nPrevious refinement notes:\n{notes_str}\n\nUse <use_tool> ONCE to provide a SINGLE ANALYSIS NOTE containing all refinement insights."
+        prompt.append("\n\n[REFINEMENT HISTORY]")
+        prompt.extend(f"- Iter {i+1}: {n[:200]}..." for i, n in enumerate(previous_notes))
 
-    print("SYSTEM", system_prompt)
+    full_prompt = "\n".join(prompt)
     print(f"[PROMPT STRUCTURE]\nInstruction: {user_input}\nChars: {len(prompt)}")
     
     response = await llm_call(
         system=system_prompt,
         messages=[{
             "role": "user",
-            "content": prompt + "\n\n" + tool_prompt
+            "content": full_prompt + "\n\n" + tool_prompt
         }],
         model_name=model_name
     )
 
-    print(f"[DEBUG] Response length: {len(response)}")
+    print(f"[DEBUG] Response length: {len(response)} chars")
     print("RESPONSE", response)
 
     story_content = response.strip() # story is the full response now, tool call will be parsed out
@@ -120,10 +124,10 @@ async def polish_story(notes: str, story: str, model_name: str, user_input: str,
 
 def refine_story(input_path: Path, output_path: Path, instruction: str, max_iterations: int = 3):
     with open(input_path, encoding='utf-8') as f:
-        story = f.read()
+        original_story = f.read()
+    story = "Nothing yet"
 
-    change_log = []
-    original_notes = story
+    change_log = []  # Track refinement notes between iterations
 
     print(f"\n[INITIAL INPUT] Story length: {len(story)} chars")
 
@@ -131,7 +135,7 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
         print(f"Refinement iteration {i+1}/{max_iterations}")
         refined_story, note = asyncio.run(
             polish_story(  # Toolbox now properly captures full notes
-                original_notes,
+                original_story,  # Pass accumulated notes
                 story,
                 args.model, # Pass model here
                 instruction,
@@ -140,7 +144,7 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
                 previous_notes=change_log if i > 0 else None,
             )
         )
-        story = refined_story # update story for next iteration
+        story = refined_story  # Update story for next iteration
         change_log.append(note)
 
         # Save intermediate with notes
@@ -151,9 +155,9 @@ def refine_story(input_path: Path, output_path: Path, instruction: str, max_iter
             f.write(f"<!-- ITERATION {i+1} NOTES:\n{note}\n-->\n\n{story}")
 
     with open(output_path, "w") as f:
-        f.write(f"<!-- FINAL REFINEMENT LOG:\n" + "\n".join(
+        f.write(story+f"\n\n<!-- FINAL REFINEMENT LOG:\n" + "\n".join(
             [f"Iteration {i+1}: {note}" for i, note in enumerate(change_log)]
-        ) + "\n-->\n\n" + story)
+        ) + "\n-->")
     print(f"Final refined story saved to {output_path}")
 
 if __name__ == "__main__":

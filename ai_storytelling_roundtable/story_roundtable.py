@@ -16,11 +16,6 @@ from common.inference_engine import llm_call
 BASE_EXPECTATIONS = """
 Review the story and suggest improvements within your specialty area to enhance its quality and impact.
 Use the replace_section tool to modify specific sections by providing revised content.
-<use_tool>
-  <name>replace_section</name>
-  <section_id>somesection</section_id>
-  <new_content>newcontent</new_content>
-</use_tool>
 
 Always ensure your changes maintain:
 - Consistency with established story elements
@@ -33,41 +28,18 @@ Identify the section you will focus on and explain your reasoning. Prioritize se
 
 current_story_context = contextvars.ContextVar('current_story', default='')
 
-def parse_sections(content: str) -> list:
-    sections = []
+def parse_sections(content: str) -> list[dict]:
+    sections = {}
+    parser = XMLParser("story")
+    events = parser.parse(content)
     current_section = None
-    state = "outside"
-    version_pattern = re.compile(r'^\{\{version:([0-9]+\.[0-9]+)/([\w/]+)\}\}$')
-    closing_pattern = re.compile(r'^\{\{/version\}\}$')
-    
-    for line in content.split('\n'):
-        if state == "outside":
-            version_match = version_pattern.match(line)
-            if version_match:
-                version_str = version_match.group(1)
-                section_name = version_match.group(2)
-                try:
-                    major, minor = map(int, version_str.split('.'))
-                except ValueError:
-                    continue  # Invalid version format
-                current_section = {
-                    'name': section_name,
-                    'version': (major, minor),
-                    'start_line': line,
-                    'content': [],
-                    'end_line': None
-                }
-                state = "inside"
-        elif state == "inside":
-            closing_match = closing_pattern.match(line)
-            if closing_match:
-                current_section['end_line'] = line
-                sections.append(current_section)
-                current_section = None
-                state = "outside"
-            else:
-                current_section['content'].append(line)
-
+    current_name = []
+    current_content = []
+    capturing_name = False
+    capturing_content = False
+    for event in events:
+        if event.mode == 'close' and event.tool is not None:
+            sections[event.tool.name]=event.tool.args['content']
     return sections
 
 def create_toolbox():
@@ -75,52 +47,25 @@ def create_toolbox():
 
     def replace_section(section_id: str, new_content: str):        
         current_story = current_story_context.get()
-        target_section = section_id.split('/')[-1]
         sections = parse_sections(current_story)
+        print("================")
+        print("REPLACING SECTION")
+        print("================")
+        print(section_id)
+        print(new_content)
+        print("================")
+        print("_____", sections)
 
-        # Find all versions of the target section
-        target_versions = [s for s in sections if s['name'] == target_section]
-
-        latest_version = (0, 0)  # Default if no section exists
-
-        if not target_versions:
-            new_major, new_minor = 1, 0 # Start at 1.0 if no section exists
-        else:
-            latest_version = max(target_versions, key=lambda x: x['version'])['version']
-            new_major, new_minor = latest_version
-            new_minor += 1
-        new_version_str = f"{new_major}.{new_minor}"
-
-        new_sections = []
-        for section in sections:
-            if section['name'] == target_section:
-                if section['version'] == latest_version:
-                    # Replace the latest version
-                    new_sections.append({
-                        'name': target_section,
-                        'version': (new_major, new_minor),
-                        'content': new_content.strip().splitlines(),
-                    })
-                else:
-                    # Keep older versions as they are
-                    new_sections.append(section)
-            else:
-                new_sections.append(section)
-
-        if not target_versions: # if no sections were found, append a new one
-            new_sections.append({
-                        'name': target_section,
-                        'version': (new_major, new_minor),
-                        'content': new_content.strip().splitlines(),
-                    })
-
+        sections[section_id] = new_content
         updated_story = ""
-        for section in new_sections:
-            current_story += f"{{{{version:{section['version'][0]}.{section['version'][1]}/{section['name']}}}}}\n"
-            current_story += "\n".join(section['content']) + "\n"
-            current_story += "{{/version}}\n"
-        current_story_context.set(updated_story)
-        return current_story
+        for name, content in sections.items():
+            updated_story += f"<story>\n"
+            updated_story += f"<name>{name}</name>\n"
+            updated_story += f"<content>\n"
+            updated_story += content+"\n"
+            updated_story += f"</content>\n</story>\n"
+
+        return updated_story
 
     toolbox.add_tool(
         name="replace_section",
@@ -235,7 +180,7 @@ USER_INPUT
 }
 
 async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5, model_name: str = 'gemini-2.0-flash-thinking-exp-01-21') -> str:
-    parser = XMLParser(tag="use_tool")
+    parser = XMLParser("use_tool")
     formatter = XMLPromptFormatter(tag="use_tool")
     toolbox = create_toolbox()
     global current_story
@@ -263,12 +208,13 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
                     formatter.usage_prompt(toolbox)
                 )
             }]
+            #print(messages[0]["content"],"__________")
             print(f"Agent: {persona['name']}, Focusing on: {section}")
             system = persona["system"].replace("USER_INPUT", user_input)
 
-            print("SYSTEM", system)
+            #print("SYSTEM", system)
             print("____")
-            print("USER", messages[0]["content"])
+            #print("USER", messages[0]["content"])
             response = await llm_call(
                 system=system,
                 messages=messages,
@@ -280,10 +226,12 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
                 if event.is_tool_call:
                     updated_story = toolbox.use(event)
                     current_story_context.set(updated_story)
-                    print(f"{persona['name']} modified event.tool.args['section_id']")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             Path("working").mkdir(parents=True, exist_ok=True)
             filename = f"working/{persona['name'].replace(' ', '_')}_iter{i}_{timestamp}.md"
+            print("CURRENT STORY")
+            print(current_story_context.get())
+            print("/CURRENT STORY")
             with open(filename, "w") as f:
                 f.write(current_story_context.get())
 

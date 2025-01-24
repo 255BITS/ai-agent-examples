@@ -1,40 +1,67 @@
-{{version:1.0/title}}
+<story>
+<name>title</name>
+<content>
 TODO something catchy
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/hook}}
+<story>
+<name>hook</name>
+<content>
 TODO Create immediate intrigue/action
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/setting}}
+<story>
+<name>setting</name>
+<content>
 TODO Environment/time period/unique physical laws
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/characters}}
+<story>
+<name>characters</name>
+<content>
 TODO
 - [Protagonist]: [Key motivation]  
 - [Opposition]: [Nature of conflict source]  
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/incident}}
+<story>
+<name>incident</name>
+<content>
 TODO Event that disrupts status quo
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/progression}}
+<story>
+<name>progression</name>
+<content>
 TODO
 1. [First escalation]
 2. [Turning point]
 3. [Critical choice]
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/twist}}
+<story>
+<name>twist</name>
+<content>
 TODO Unexpected truth that reframes conflict
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/resolution}}
+<story>
+<name>resolution</name>
+<content>
 TODO Concrete steps toward climax
-{{/version}}
+</content>
+</story>
 
-{{version:1.0/close}}
+<story>
+<name>close</name>
+<content>
 TODO Lasting impression/visual/metaphor
-{{/version}}
+</content>
+</story>
