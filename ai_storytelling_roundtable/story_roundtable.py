@@ -62,7 +62,7 @@ def create_toolbox():
             updated_story += f"<story>\n"
             updated_story += f"<name>{name}</name>\n"
             updated_story += f"<content>"
-            updated_story += content
+            updated_story += content.strip()
             updated_story += f"</content>\n</story>\n"
 
         return updated_story
