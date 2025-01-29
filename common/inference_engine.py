@@ -1,6 +1,7 @@
 import json
 import os
 import asyncio
+import time
 import httpx
 import anthropic
 from typing import Any, Dict, List, Optional, AsyncGenerator
@@ -33,11 +34,13 @@ class InferenceEngine:
         self,
         provider: str = "anthropic",
         model_name: str = None,
+        temperature: float = 0.7,
         max_tokens: int = 8192,
     ):
         self.provider = provider
         self.model_name = model_name
         self.max_tokens = max_tokens
+        self.temperature = temperature
 
     async def infer_stream(
         self,
@@ -95,6 +98,7 @@ class InferenceEngine:
             model=model,
             messages=messages,
             system=system,
+            temperature=self.temperature,
             max_tokens=self.max_tokens
         ) as stream:
             async for event in stream:
@@ -116,7 +120,10 @@ class InferenceEngine:
         """
         import json
 
-        nano_gpt_endpoint = "https://nano-gpt.com/api/v1/chat/completions"
+        api_key = os.getenv('NANOGPT_API_KEY')
+        base_url = os.getenv('NANOGPT_BASE_URL', "https://nano-gpt.com/api/v1")
+ 
+        nano_gpt_endpoint = base_url + "/chat/completions"
         model = self.model_name or "nano-gpt-base"
 
         combined_messages = []
@@ -140,7 +147,7 @@ class InferenceEngine:
             "stream": True
         }
         headers = {
-            "Authorization": f"Bearer {NANO_GPT_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
 
@@ -148,7 +155,15 @@ class InferenceEngine:
             async with client.stream("POST", nano_gpt_endpoint, headers=headers, json=data) as response:
                 if response.status_code != 200:
                     err_text = await response.aread()
-                    yield InferenceEvent("token_delta", text=f"Error: {err_text.decode()}")
+                    err_text = err_text.decode()
+                    if 'rate_limit_exceeded' in json.dumps(err_text):
+                        print("Retrying in 15 sec")
+                        await asyncio.sleep(15)
+                        async for event in self._stream_nanogpt(messages, system):
+                            yield event
+                        return
+
+                    yield InferenceEvent("token_delta", text=f"Error: {err_text}")
                     return
 
                 buffer = ""
@@ -171,10 +186,11 @@ class InferenceEngine:
                                 pass
 
 
-async def llm_call(system, messages, model_name=None):
+async def llm_call(system, messages, model_name=None, temperature=0.7):
     engine = InferenceEngine(
         provider="nanogpt",
         model_name=model_name or "deepseek-reasoner",
+        temperature=temperature,
         max_tokens=4096,
     )
     if model_name == "gemini-2.0-flash-thinking-exp-01-21":

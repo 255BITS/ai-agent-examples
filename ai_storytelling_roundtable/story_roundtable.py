@@ -65,6 +65,8 @@ def create_toolbox():
             updated_story += content.strip()
             updated_story += f"</content>\n</story>\n"
 
+        current_story_context.set(updated_story)
+
         return updated_story
 
     toolbox.add_tool(
@@ -179,7 +181,7 @@ USER_INPUT
 """
 }
 
-async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5, model_name: str = 'gemini-2.0-flash-thinking-exp-01-21') -> str:
+async def process_story_with_agents(story: str, user_input: str, max_iterations: int = 5, model_name: str = 'gemini-2.0-flash-thinking-exp-01-21', temperature: float = None) -> str:
     parser = XMLParser("use_tool")
     formatter = XMLPromptFormatter(tag="use_tool")
     toolbox = create_toolbox()
@@ -218,14 +220,14 @@ async def process_story_with_agents(story: str, user_input: str, max_iterations:
             response = await llm_call(
                 system=system,
                 messages=messages,
-                model_name=model_name
+                model_name=model_name,
+                temperature=temperature
             )
             print(f"Response from {persona['name']}:\n{response}")
 
             for event in parser.parse(response):
                 if event.is_tool_call:
-                    updated_story = toolbox.use(event)
-                    current_story_context.set(updated_story)
+                    toolbox.use(event)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             Path("working").mkdir(parents=True, exist_ok=True)
             filename = f"working/{persona['name'].replace(' ', '_')}_iter{i}_{timestamp}.md"
@@ -249,6 +251,8 @@ if __name__ == "__main__":
                         help='Maximum number of refinement passes (default: 5)')
     parser.add_argument('--model', type=str, default='gemini-2.0-flash-thinking-exp-01-21',
                         help='LLM model to use for inference')
+    parser.add_argument('--temperature', type=float, default=None,
+                        help='Temperature parameter for LLM generation (0.0-1.0)')
 
     args = parser.parse_args()
 
@@ -260,7 +264,7 @@ if __name__ == "__main__":
     with open(args.input) as f:
         story = f.read()
 
-    final_story = asyncio.run(process_story_with_agents(story, args.command, args.max_iterations, args.model))
+    final_story = asyncio.run(process_story_with_agents(story, args.command, args.max_iterations, args.model, args.temperature))
 
     with open(args.output, "w") as f:
         f.write(final_story)
