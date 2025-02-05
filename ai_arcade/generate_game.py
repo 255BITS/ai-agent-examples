@@ -27,15 +27,6 @@ from ai_agent_toolbox import Toolbox, XMLParser, XMLPromptFormatter
 def llm_call(prompt: str, system_prompt: str = "", base_url: str = "", model: str = "o3-mini") -> str:
     """
     Calls the model with the given prompt and returns the response.
-
-    Args:
-        prompt (str): The user prompt to send to the model.
-        system_prompt (str, optional): The system prompt to send to the model. Defaults to "".
-        model (str, optional): The model to use for the call.
-        base_url (str, optional): The base URL of the API. Defaults to "https://api.deepseek.com".
-
-    Returns:
-        str: The response from the language model.
     """
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], base_url=base_url)
 
@@ -86,6 +77,7 @@ def main():
 
     # pending_files will be set once the LLM calls design_game.
     pending_files = None  # This will be a set of file paths (strings)
+    game_design = None    # This will capture the design output from the design_game tool
 
     # Create the toolbox and supporting parser/formatter within main to capture local state.
     toolbox = Toolbox()
@@ -125,17 +117,19 @@ def main():
         name="write_file",
         fn=write_file,
         args={
-            "path": {"type": "string", "description": "Relative file path (e.g., core/game_engine.js)"},
+            "path": {"type": "string", "description": "Relative file path, keep flat and assume they will generate all in the same folder (e.g., game.js)"},
             "content": {"type": "string", "description": "Content of the file"}
         },
         description="Immediately write a file to the generated project"
     )
 
-    # Tool: design_game
+    # Tool: design_game with corrected argument names.
     def design_game(game_name, description, project, expected_files):
-        nonlocal pending_files
-        print(f"[design_game] Designing game '{game_name_arg}' with description:\n{description_arg}")
-        print(f"[design_game] Received project contents (first 500 chars):\n{project_str[:500]}...")
+        nonlocal pending_files, game_design
+        # Capture the design.
+        game_design = description
+        print(f"[design_game] Designing game '{game_name}' with design:\n{description}")
+        print(f"[design_game] Received project contents (first 500 chars):\n{project[:500]}...")
         print(f"[design_game] Expected files (comma-delimited): {expected_files}")
         # Convert the comma-delimited expected_files string into a set.
         pending_files = set([f.strip() for f in expected_files.split(",") if f.strip()])
@@ -146,8 +140,8 @@ def main():
         fn=design_game,
         args={
             "game_name": {"type": "string", "description": "Name of the game"},
-            "description": {"type": "string", "description": "Game design description"},
-            "project": {"type": "string", "description": "Comma-delimited list of project files with contents"},
+            "description": {"type": "string", "description": "Complete game design description"},
+            "project": {"type": "string", "description": "Full project contents"},
             "expected_files": {"type": "string", "description": "Comma-delimited list of expected file paths"}
         },
         description="Design the new game before generating files; set the expected file list."
@@ -175,7 +169,7 @@ def main():
 
     # Main loop: call the LLM and process events until all expected files have been generated.
     while True:
-        print("calling  with", system, "---", prompt, "+++")
+        print("calling with system prompt:", system, "\nand user prompt:", prompt)
         response = llm_call(system_prompt=system, prompt=prompt, base_url=os.getenv("OPENAI_BASE_URL", "https://nano-gpt.com/api/v1"))
         events = parser.parse(response)
         if not events:
@@ -186,10 +180,9 @@ def main():
         # Update the system prompt with current pending files (if design_game has been called).
         if pending_files is not None:
             system = (
-                f"You are a game design AI agent. Your task is to design a new game called '{game_name}' "
-                f"with the following description:\n\n{description}\n\n"
-                "Below are all of the current project file contents:\n\n"
-                f"{project_summary}\n"
+                f"You are a game design AI agent. Your design for '{game_name}' is as follows:\n\n"
+                f"{game_design}\n\n"
+                f"Here is the project summary with current file contents:\n\n{project_summary}\n"
                 "Remember: You must call design_game before writing any files with write_file.\n"
                 f"Pending files to generate: {', '.join(sorted(pending_files))}\n"
             )
