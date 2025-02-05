@@ -21,9 +21,10 @@ for any list data.
 
 import os
 import sys
+from openai import OpenAI
 from ai_agent_toolbox import Toolbox, XMLParser, XMLPromptFormatter
 
-def lm_call(prompt: str, system_prompt: str = "", model: str = "o3-mini") -> str:
+def llm_call(prompt: str, system_prompt: str = "", base_url: str = "", model: str = "o3-mini") -> str:
     """
     Calls the model with the given prompt and returns the response.
 
@@ -36,7 +37,7 @@ def lm_call(prompt: str, system_prompt: str = "", model: str = "o3-mini") -> str
     Returns:
         str: The response from the language model.
     """
-    client = OpenAI()
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], base_url=base_url)
 
     messages = []
     if system_prompt:
@@ -131,7 +132,7 @@ def main():
     )
 
     # Tool: design_game
-    def design_game(game_name_arg, description_arg, project_str, expected_files):
+    def design_game(game_name, description, project, expected_files):
         nonlocal pending_files
         print(f"[design_game] Designing game '{game_name_arg}' with description:\n{description_arg}")
         print(f"[design_game] Received project contents (first 500 chars):\n{project_str[:500]}...")
@@ -174,7 +175,8 @@ def main():
 
     # Main loop: call the LLM and process events until all expected files have been generated.
     while True:
-        response = llm_call(system_prompt=system, prompt=prompt)
+        print("calling  with", system, "---", prompt, "+++")
+        response = llm_call(system_prompt=system, prompt=prompt, base_url=os.getenv("OPENAI_BASE_URL", "https://nano-gpt.com/api/v1"))
         events = parser.parse(response)
         if not events:
             print("[main] No events returned by LLM, re-prompting...")
