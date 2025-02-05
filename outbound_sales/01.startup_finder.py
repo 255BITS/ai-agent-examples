@@ -1,6 +1,7 @@
 import json
 import requests
 import csv
+import re
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from ai_agent_toolbox import Toolbox, XMLParser, XMLPromptFormatter
@@ -64,7 +65,6 @@ def scrape_techcrunch_funding():
         
         # Minimal attempt to find an amount: look for '$xx million' or '$xxM'
         funding_amount = 0.0
-        import re
         match = re.search(r"\$(\d+(\.\d+)?)\s*(million|M)", snippet_text, re.IGNORECASE)
         if match:
             # E.g. $5 million => 5, $2.5M => 2.5
@@ -157,6 +157,8 @@ def scrape_funding_tool():
                for idx, lead in enumerate(filtered)]
     return "Found leads:\n" + "\n".join(summary)
 
+print("Scraping funding", scrape_funding_tool())
+otneuh()
 toolbox.add_tool(
     name="scrape_funding",
     fn=scrape_funding_tool,
