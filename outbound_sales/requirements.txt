@@ -1,5 +1,6 @@
-requests==2.31.0
-python-dotenv==1.0.0
-pandas==2.1.0
+requests==2.33.0
+certifi>=2026.10.19
+python-dotenv==1.2.2
+pandas==2.1.4
 beautifulsoup4==4.12.2  # if we go scraping route
 google-api-python-client==2.97.0  # if we use Google News API
